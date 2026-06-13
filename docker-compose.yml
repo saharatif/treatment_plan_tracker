@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: orbs
+      POSTGRES_USER: orbs
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+
+  backend:
+    build: ./backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://orbs:${DB_PASSWORD}@db/orbs
+      KMS_KEY: ${KMS_KEY}
+      MISTRAL_API_KEY: ${MISTRAL_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      JWT_SECRET: ${JWT_SECRET}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-480}
+      DEMO_CLINICIAN_PASSWORD: ${DEMO_CLINICIAN_PASSWORD}
+      DEMO_BILLING_PASSWORD: ${DEMO_BILLING_PASSWORD}
+      DEMO_PATIENT_PASSWORD: ${DEMO_PATIENT_PASSWORD}
+      AI_OCR_PROVIDER: ${AI_OCR_PROVIDER:-mistral}
+      AI_PARSER_PROVIDER: ${AI_PARSER_PROVIDER:-openai}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
+      BILLING_EMAIL: ${BILLING_EMAIL}
+      BILLING_PORTAL_BASE_URL: ${BILLING_PORTAL_BASE_URL:-http://localhost:3000}
+      ENABLE_CHECKPOINT_SCHEDULER: ${ENABLE_CHECKPOINT_SCHEDULER:-false}
+      CHECKPOINT_CRON_HOUR: ${CHECKPOINT_CRON_HOUR:-8}
+      CHECKPOINT_GRACE_ANY_ORB: ${CHECKPOINT_GRACE_ANY_ORB:-true}
+      REPORT_OUTPUT_DIR: ${REPORT_OUTPUT_DIR:-/app/reports}
+    depends_on:
+      - db
+      - mailpit
+    ports:
+      - "8000:8000"
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "8025:8025"   # web UI — view caught emails at http://localhost:8025
+      - "1025:1025"   # SMTP
+
+volumes:
+  pgdata:
