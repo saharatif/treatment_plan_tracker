@@ -1,3 +1,7 @@
+"""Generates the per-plan completion report PDF (final orb outcomes, derived
+adherence metrics, and alert history) using reportlab, and caches it to disk
+under settings.report_output_dir."""
+
 from pathlib import Path
 import re
 from statistics import mean
@@ -27,6 +31,8 @@ async def generate_completion_report(plan_id: str, session: AsyncSession) -> Pat
 
 
 async def get_or_create_completion_report(plan_id: str, session: AsyncSession) -> Path:
+    # Reports are immutable once generated (a plan is only closed once), so reuse the
+    # cached file on disk instead of re-querying and re-rendering.
     report_path = Path(settings.report_output_dir) / f"{plan_id}_completion_report.pdf"
     if report_path.exists():
         return report_path
@@ -82,10 +88,14 @@ async def _fetch_alerts(plan_id: str, session: AsyncSession) -> list[dict[str, A
 
 
 def _derive_metrics(orbs: list[dict[str, Any]]) -> dict[str, Any]:
+    # Lightweight regex scan over free-form orb notes to surface adherence signals
+    # (e.g. "glucose: 145", "adherence: 90%") in the report without a separate
+    # structured-data entry workflow.
     notes = "\n".join(str(orb.get("notes") or "") for orb in orbs)
     glucose_values = [int(value) for value in re.findall(r"glucose[:= ]+(\d{2,3})", notes, re.IGNORECASE)]
     exercise_days = len(re.findall(r"exercise|walk|workout", notes, re.IGNORECASE))
     adherence_mentions = re.findall(r"adherence[:= ]+(\d{1,3})%", notes, re.IGNORECASE)
+    # Last mention wins, assuming later notes reflect the most recent self-report.
     adherence = int(adherence_mentions[-1]) if adherence_mentions else None
     return {
         "glucose_average": round(mean(glucose_values), 1) if glucose_values else None,
@@ -107,6 +117,8 @@ def _write_pdf(
     y = height - 50
 
     def line(text: str, size: int = 10, bold: bool = False) -> None:
+        # Auto-paginate when nearing the bottom margin, and truncate long lines so
+        # they don't run off the page edge.
         nonlocal y
         if y < 60:
             c.showPage()

@@ -1,3 +1,9 @@
+"""Endpoints for updating an individual orb's status (complete/in_progress/skipped).
+
+Clinicians and coordinators can update any orb; patients may only update
+orbs on their own plan (enforced in _authorize_orb_mutation).
+"""
+
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -57,6 +63,8 @@ async def _authorize_orb_mutation(orb_ref: str, user: User, session: AsyncSessio
         return
     if user.role != "patient":
         raise HTTPException(status_code=403, detail="Insufficient role")
+    # Patient role: look up which patient owns this orb and confirm it matches
+    # the patient_id on the caller's token.
     context = await get_orb_context(orb_ref, session)
     if context is None:
         raise ValueError("Orb not found")

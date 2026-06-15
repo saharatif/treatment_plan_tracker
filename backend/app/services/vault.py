@@ -1,3 +1,11 @@
+"""Encrypted patient PII vault.
+
+PII is encrypted at rest with Postgres's pgp_sym_encrypt/decrypt using
+KMS_KEY, and is keyed by patient_id but addressable via an opaque `token`
+(app/ids.py:generate_token) that never embeds or derives from PII. Every read
+appends an entry to access_log for auditability.
+"""
+
 from datetime import datetime, timezone
 import json
 from typing import Any
@@ -27,6 +35,8 @@ async def _token_exists(session: AsyncSession, token: str) -> bool:
 
 
 async def generate_unique_token(session: AsyncSession) -> str:
+    # generate_token() is random hex, so collisions are vanishingly unlikely but still
+    # checked and retried for safety.
     for _ in range(MAX_UNIQUE_ID_ATTEMPTS):
         candidate = generate_token()
         if not await _token_exists(session, candidate):
@@ -78,6 +88,8 @@ async def upsert_patient_vault(session: AsyncSession, patient_id: str, pii: dict
 
 
 async def read_patient_pii(session: AsyncSession, patient_id: str, accessed_by: str) -> dict[str, str] | None:
+    # Decryption happens in Postgres (pgp_sym_decrypt) so plaintext PII never needs to
+    # be reconstructed application-side from raw bytes.
     kms_key = require_kms_key()
     result = await session.execute(
         text(

@@ -147,21 +147,119 @@ by severity. Each entry: **Status**, **Severity**, **Component**, **Description*
 
 ## BUG-007 — `email_quotation()` SMTP client has no port/auth/TLS support
 
-- **Status:** 🟡 Open
-- **Severity:** Medium (Module 2 billing emails will fail against any real SMTP provider)
+- **Status:** ✅ Fixed
+- **Severity:** Medium (Module 2 billing emails will fail against any real SMTP provider) — this
+  also surfaced as a **500 Internal Server Error on `POST /api/ingest`** once `BILLING_EMAIL` was
+  set, because `smtplib.SMTP(settings.smtp_host)` defaulted to port 25 while Mailpit listens on
+  1025, raising `ConnectionRefusedError` that propagated unhandled out of `quote_email_and_log`.
 - **Component:** `backend/app/services/billing.py` (`email_quotation`), `backend/app/config.py`
-- **Description:** `email_quotation()` connects via `smtplib.SMTP(settings.smtp_host)` with no
-  port, no authentication, and no TLS/STARTTLS. `config.py` only defines `smtp_host` — there are
-  no `smtp_port`, `smtp_user`, `smtp_password`, or `smtp_use_tls` settings. This works against an
-  unauthenticated dev relay (e.g. Mailpit/MailHog on port 1025) but will fail against any real
-  provider (Postfix, AWS SES, SendGrid, Brevo, etc.), which require port 587/465 + STARTTLS/SSL +
-  login credentials.
-- **Fix direction:** Add `smtp_port` (default `587`), `smtp_user`, `smtp_password`, and
-  `smtp_use_tls` (default `true`) to `config.py`/`.env(.example)`, and update `email_quotation()`
-  to connect via `smtplib.SMTP(host, port)` + `starttls()` + `login(user, password)` when
-  credentials are configured — falling back to the current unauthenticated/no-TLS path for local
-  dev relays (Mailpit) where `smtp_user`/`smtp_password` are blank.
-- **Owner:** Developer, alongside Module 2 billing work.
+- **Description:** `email_quotation()` connected via `smtplib.SMTP(settings.smtp_host)` with no
+  port, no authentication, and no TLS/STARTTLS. `config.py` only defined `smtp_host`.
+- **Fix:** Added `smtp_port` (default `587`), `smtp_user`, `smtp_password`, and `smtp_use_tls`
+  (default `true`) to `config.py`. `email_quotation()` now connects via
+  `smtplib.SMTP(host, port)`, calls `starttls()` when `smtp_use_tls` is set, and `login()` when
+  `smtp_user`/`smtp_password` are configured. Local dev (`.env`/`.env.example`/
+  `docker-compose.yml`) sets `SMTP_PORT=1025`, `SMTP_USE_TLS=false` to match Mailpit's
+  unauthenticated relay; real providers should set `SMTP_PORT=587`, `SMTP_USE_TLS=true`, and
+  `SMTP_USER`/`SMTP_PASSWORD`.
+- **Owner:** Team Lead (fixed during Module 3/4 review, blocking `/api/ingest`).
+
+---
+
+## BUG-008 — Patient login accepted a self-asserted `patient_id`, allowing full impersonation
+
+- **Status:** ✅ Fixed
+- **Severity:** Critical (any holder of the shared `DEMO_PATIENT_PASSWORD` could read/mutate any
+  other patient's data)
+- **Component:** `backend/app/auth.py` (`authenticate_demo_user`), `backend/app/routers/orbs.py`
+  (`_authorize_orb_mutation`), `backend/app/routers/dashboard.py` (`patient_detail`),
+  `frontend/src/App.tsx` (login form)
+- **Description:** `authenticate_demo_user` minted a JWT with `patient_id` taken verbatim from
+  the client-supplied `LoginRequest.patient_id` field (exposed in the UI as a free-text "Patient
+  token" input), with no verification against any patient record. All patient-scoped
+  authorization checks (`_authorize_orb_mutation`, `patient_detail`) trust this claim, so any
+  client knowing the one shared demo patient password could impersonate any patient by typing a
+  different ID at login — a complete bypass of the "Patient token scope mismatch" check.
+- **Fix:** `LoginRequest.patient_id` renamed to `patient_token`. `authenticate_demo_user` is now
+  async and, for the `patient` role, looks up the supplied token against
+  `vault.patient_vault.token` (the existing unguessable per-patient token generated at
+  enrollment) to resolve the real `patient_id`; login fails (401) if the token is missing or
+  unknown. The JWT's `patient_id` claim now always comes from the verified DB lookup, never from
+  client input. `routers/auth.py` now injects a DB session; frontend login sends
+  `patient_token`. Added `test_authenticate_patient_resolves_patient_id_from_token`,
+  `test_authenticate_patient_rejects_unknown_token`, and
+  `test_authenticate_patient_requires_token` to `backend/tests/test_auth.py`.
+- **Owner:** Team Lead (fixed during Module 3/4 review).
+
+---
+
+## BUG-009 — Failed-validation plans queued in `REVIEW_QUEUE` had no retrieval path
+
+- **Status:** ✅ Fixed
+- **Severity:** Medium (human-review requirement for failed validations was effectively
+  unreachable)
+- **Component:** `backend/app/routers/ingest.py`, `frontend/src/pages/Upload.tsx`
+- **Description:** On validation failure, `_enqueue_review` stored the parsed plan + errors in a
+  module-level in-memory `REVIEW_QUEUE` dict and returned a `review_id`, but no endpoint or
+  frontend page ever read `REVIEW_QUEUE` back. Queued items were lost on process restart and
+  invisible to anyone except the original uploader (who only saw `review_id` + `errors`, not the
+  parsed plan needing correction).
+- **Fix:** Added `GET /api/review-queue` (list, role-gated clinician/coordinator) and
+  `GET /api/review-queue/{review_id}` (full item incl. `parsed_plan`) to
+  `backend/app/routers/ingest.py`. Added a "Needs Review" panel to `Upload.tsx` that lists queued
+  items and lets a reviewer expand one to see the parsed plan and validation errors.
+  `REVIEW_QUEUE` remains in-memory (process-restart loses the queue) — persisting it to the
+  database is a reasonable future follow-up but out of scope for this fix.
+- **Owner:** Team Lead (fixed during Module 3/4 review).
+
+---
+
+## BUG-010 — `confirm-billing` 500s: enrollment passed orb `target_date` as a string to a `Date` column
+
+- **Status:** ✅ Fixed
+- **Severity:** High (`POST /api/plans/{plan_id}/confirm-billing` always failed with a 500 for
+  any parsed plan that included per-orb `target_date` values — i.e. the "Confirm Billing" button
+  did nothing visible in the UI)
+- **Component:** `backend/app/services/enrollment.py` (`enroll`)
+- **Description:** `enroll()` built the `target_date` INSERT parameter as
+  `orb.get("target_date") or plan["target_date"]`. `orb["target_date"]` comes from the parsed
+  plan JSON and is an ISO date **string** (e.g. `"2025-06-14"`), while `plan["target_date"]` from
+  the DB query is a `datetime.date`. asyncpg requires a `date` object for a `Date` column and
+  raised `asyncpg.exceptions.DataError: invalid input for query argument $6: '2025-06-14'
+  ('str' object has no attribute 'toordinal')`, which propagated as an unhandled 500 from
+  `confirm_billing`.
+- **Fix:** Added `_coerce_date()` to `enrollment.py`, which parses ISO date strings to
+  `datetime.date` (passing through existing `date` values, returning `None` for missing/blank).
+  `enroll()` now uses `_coerce_date(orb.get("target_date")) or plan["target_date"]`. Added
+  `backend/tests/test_enrollment.py` covering `_coerce_date` and an `enroll()` call with a
+  string `target_date`.
+- **Owner:** Team Lead (fixed during Module 3/4 review, blocking "Confirm Billing").
+
+---
+
+## BUG-011 — Orb status update endpoints 500 with asyncpg `AmbiguousParameterError`
+
+- **Status:** ✅ Fixed
+- **Severity:** High (`POST /api/orbs/{orb_ref}/status` and `POST /api/orbs/{orb_ref}/complete`
+  always 500'd — the "Start"/"Complete"/"Skip" buttons on the orb tracker did nothing)
+- **Component:** `backend/app/services/orbs.py` (`set_orb_status`)
+- **Description:** The `UPDATE app.patient_orbs` statement reused the same named bind parameter
+  `:status` in two different SQL contexts — an assignment (`status = :status`) and a comparison
+  inside a `CASE` (`CASE WHEN :status = 'complete' ...`). SQLAlchemy compiles both occurrences to
+  the same positional parameter (`$1`), but asyncpg's prepared-statement type inference deduced
+  different types for `$1` from the two usage sites, raising
+  `asyncpg.exceptions.AmbiguousParameterError: inconsistent types deduced for parameter $1,
+  DETAIL: text versus character varying`. Casting the literal (`'complete'::varchar`) did not
+  help, since the conflict is in how `$1` itself is typed across its two occurrences, not in the
+  literal's type.
+- **Fix:** Bound the `CASE WHEN` comparison to its own parameter (`:status_check`), passed the
+  same Python value for both `status` and `status_check`. Each named parameter now gets its own
+  independent `$N` slot, so asyncpg no longer needs to unify two different inferred types for the
+  same position.
+- **Owner:** Team Lead (fixed during Module 3/4 review). Verified via direct API calls
+  (`POST /api/orbs/ORB-PAT00847-001/status` → `in_progress`, `POST
+  /api/orbs/ORB-PAT00847-001/complete` → `complete` with `completed_at` set) and confirmed in
+  `app.patient_orbs`.
 
 ---
 

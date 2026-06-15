@@ -1,3 +1,10 @@
+"""PDF text extraction for the ingestion pipeline.
+
+Uses Mistral's cloud OCR when configured (AI_OCR_PROVIDER=mistral and a key is
+set), otherwise falls back to local text extraction with pypdf - sufficient
+for clean, digitally-generated synthetic PDFs used in development.
+"""
+
 import base64
 from pathlib import Path
 

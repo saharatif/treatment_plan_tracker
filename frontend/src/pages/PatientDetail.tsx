@@ -1,6 +1,7 @@
 import { Download, RotateCcw } from "lucide-react";
 import { downloadReport, useCompleteOrb, usePatientDetail, useSetOrbStatus } from "../api/client";
 import OrbRow from "../components/OrbRow";
+import PlanProgress from "../components/PlanProgress";
 import StatusBadge from "../components/StatusBadge";
 
 export default function PatientDetail({ patientId, onBack }: { patientId: string | null; onBack: () => void }) {
@@ -9,6 +10,7 @@ export default function PatientDetail({ patientId, onBack }: { patientId: string
   const setStatus = useSetOrbStatus();
   const plan = detail.data?.plan;
   const orbs = detail.data?.orbs ?? [];
+  const completedCount = orbs.filter((orb) => orb.status === "complete" || orb.status === "completed").length;
 
   if (!patientId) return null;
 
@@ -26,12 +28,21 @@ export default function PatientDetail({ patientId, onBack }: { patientId: string
           </button>
         ) : null}
       </div>
+      {plan ? (
+        <PlanProgress
+          completed={completedCount}
+          total={orbs.length}
+          planStart={plan.plan_start}
+          targetDate={plan.target_date}
+          hardStop={plan.hard_stop}
+        />
+      ) : null}
       <OrbRow orbs={orbs} />
       <div className="stack">
         {orbs.map((orb) => (
           <div className="orb-card" key={String(orb.orb_ref)}>
             <div>
-              <strong>{orb.orb_number}. {orb.title ?? orb.catalog_code ?? orb.orb_ref}</strong>
+              <strong><span className="orb-number">{orb.orb_number}.</span> {orb.title ?? orb.catalog_code ?? orb.orb_ref}</strong>
               <p className="muted">{orb.category ?? "Unmapped"} · target {orb.target_date ?? "N/A"}</p>
               {orb.notes ? <p>{orb.notes}</p> : null}
             </div>

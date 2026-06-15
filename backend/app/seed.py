@@ -1,3 +1,10 @@
+"""Seeds the orb catalog and billing code reference tables from app/seed_data.py.
+
+Safe to re-run: uses upserts (ON CONFLICT DO UPDATE) keyed on catalog_code /
+code, so existing rows are refreshed rather than duplicated. Run directly
+with `python -m app.seed` or via `seed_all()`.
+"""
+
 import asyncio
 
 from sqlalchemy.dialects.postgresql import insert

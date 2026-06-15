@@ -1,3 +1,11 @@
+"""Extracts structured treatment-plan data (10 orbs + diagnoses) from OCR text.
+
+Three backends are supported, tried in order of preference based on config:
+OpenAI / Ollama (LLM-based, given ORB_PARSER_SYSTEM_PROMPT), or a regex-based
+local fallback (extract_orbs_local) for clean synthetic PDFs when no AI
+provider is configured.
+"""
+
 import json
 import re
 from datetime import date
@@ -52,6 +60,8 @@ async def extract_orbs_from_text(ocr_text: str) -> dict[str, Any]:
         return await extract_orbs_openai(ocr_text)
     if provider == "ollama":
         return await extract_orbs_ollama(ocr_text)
+    # No AI provider configured (or OpenAI selected without a key) - fall back to
+    # regex extraction, which only works for the synthetic PDF format.
     return extract_orbs_local(ocr_text)
 
 
@@ -134,6 +144,9 @@ def _normalize_date(value: str | None) -> str | None:
 
 
 def _extract_diagnoses(text: str) -> list[dict[str, str]]:
+    # Only codes present in our known ICD-10 catalog are kept, which both filters out
+    # false-positive matches and excludes non-ICD codes (CPT/HCPCS) the regex might
+    # also match.
     known_icd10 = {code for code, _ in ICD10_CODES}
     codes = sorted(set(re.findall(r"\b([A-Z]\d{2}(?:\.\d+)?(?:[A-Z])?)\b", text)) & known_icd10)
     return [
@@ -144,6 +157,9 @@ def _extract_diagnoses(text: str) -> list[dict[str, str]]:
 
 
 def _extract_orbs(text: str) -> list[dict[str, Any]]:
+    # Splitting on "Orb N" headers turns the document into alternating
+    # [pre-text, number, body, number, body, ...] chunks - odd indices are the
+    # captured orb numbers, the following even index is that orb's body text.
     chunks = re.split(r"\bOrb\s+(\d{1,2})\b", text, flags=re.IGNORECASE)
     orbs: list[dict[str, Any]] = []
     for index in range(1, len(chunks), 2):
@@ -184,6 +200,8 @@ def _category_for_catalog_code(catalog_code: str | None) -> str | None:
 
 
 def _extract_codes(text: str) -> list[str]:
+    # Codes are only picked up when explicitly labeled "CPT:"/"HCPCS:"/"ICD-10:" in the
+    # source text, so this won't match codes mentioned in free-form notes.
     cpt_hcpcs = re.findall(r"\b(?:CPT|HCPCS):\s*([A-Z]?\d{4,5}(?:,\s*[A-Z]?\d{4,5})*)", text, flags=re.IGNORECASE)
     codes: set[str] = set()
     for group in cpt_hcpcs:

@@ -1,3 +1,10 @@
+"""Background scheduler for the daily treatment-plan checkpoint evaluation.
+
+When enabled (ENABLE_CHECKPOINT_SCHEDULER), runs `evaluate_all_open_plans`
+once a day at CHECKPOINT_CRON_HOUR to send alerts, advance plan status, and
+close out completed/expired plans.
+"""
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.config import settings
@@ -8,6 +15,7 @@ checkpoint_scheduler = AsyncIOScheduler()
 
 
 async def run_checkpoint_job() -> None:
+    # Uses its own session since this runs outside any request lifecycle.
     async with AsyncSessionLocal() as session:
         await evaluate_all_open_plans(session)
 

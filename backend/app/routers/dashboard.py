@@ -1,3 +1,7 @@
+"""Read-only endpoints for the clinic dashboard, patient detail view, and
+at-risk patient list. All plan_status / OVERDUE / IN GRACE / ON TRACK labels
+are computed in SQL from target_date and hard_stop relative to CURRENT_DATE."""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +43,7 @@ async def patient_detail(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ) -> dict:
+    # Patients may only view their own plan; staff roles can view any patient.
     if user.role == "patient" and user.patient_id != patient_id:
         raise HTTPException(status_code=403, detail="Patient token scope mismatch")
     if user.role not in {"clinician", "coordinator", "billing", "patient"}:
@@ -102,6 +107,7 @@ async def at_risk(session: AsyncSession = Depends(get_session)) -> list[dict]:
 
 
 def _mapping_to_dict(row) -> dict:
+    # Converts date/datetime columns to ISO strings so rows are JSON-serializable.
     return {
         key: value.isoformat() if hasattr(value, "isoformat") else value
         for key, value in dict(row).items()

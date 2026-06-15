@@ -1,3 +1,9 @@
+"""Billing confirmation and quotation retrieval endpoints.
+
+Confirming billing is the step that turns a pending-enrollment plan (created
+during ingest) into an active plan with real patient_orbs rows.
+"""
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +25,8 @@ async def confirm_billing(plan_id: str, session: AsyncSession = Depends(get_sess
     if quote is None:
         raise HTTPException(status_code=404, detail="Quotation not found for plan")
 
+    # The quote's plan_snapshot is the parsed plan captured at ingest time - it's the
+    # only place the 10 parsed orbs are stored until enrollment writes patient_orbs.
     plan_snapshot = quote.get("plan_snapshot") or {}
     parsed_orbs = plan_snapshot.get("orbs", [])
     patient_id = plan_snapshot.get("patient_id")
@@ -40,6 +48,7 @@ async def list_quotations(session: AsyncSession = Depends(get_session)) -> list[
 
 
 async def _latest_quote_for_plan(plan_id: str, session: AsyncSession) -> dict | None:
+    # A plan can be re-quoted, so take the most recent quotation_log row for it.
     result = await session.execute(
         text(
             """

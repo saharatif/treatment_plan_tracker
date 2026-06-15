@@ -1,3 +1,9 @@
+"""ID and token generators for patients, plans, orbs, and vault tokens.
+
+All IDs are randomly generated and human-readable (e.g. PAT-2026-00847), so
+collisions are possible but rare - see MAX_UNIQUE_ID_ATTEMPTS below.
+"""
+
 from datetime import datetime
 import secrets
 
@@ -16,6 +22,8 @@ def generate_plan_id() -> str:
 
 
 def generate_orb_ref(patient_id: str, orb_number: int) -> str:
+    # Embeds the patient's numeric suffix so orb refs stay human-traceable, e.g.
+    # patient PAT-2026-00847 -> ORB-PAT00847-003.
     return f"ORB-PAT{patient_id.split('-')[-1]}-{orb_number:03d}"
 
 

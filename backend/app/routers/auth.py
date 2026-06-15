@@ -1,13 +1,15 @@
-from fastapi import APIRouter, HTTPException
+"""Auth endpoints. Login itself happens client-side via Supabase; this just
+exposes the resolved app role/patient scope for the current session."""
 
-from app.auth import LoginRequest, TokenResponse, authenticate_demo_user, issue_token
+from typing import Annotated
+
+from fastapi import APIRouter, Depends
+
+from app.auth import User, get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(payload: LoginRequest) -> TokenResponse:
-    user = authenticate_demo_user(payload)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return TokenResponse(access_token=issue_token(user), user=user)
+@router.get("/me", response_model=User)
+async def me(user: Annotated[User, Depends(get_current_user)]) -> User:
+    return user

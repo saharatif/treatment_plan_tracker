@@ -127,7 +127,7 @@ npm install
 npm run build
 ```
 
-Docker Compose now includes the frontend at `http://localhost:3000`. The React app includes login,
+Docker Compose now includes the frontend at `http://localhost:3001`. The React app includes login,
 clinic dashboard, at-risk panel, patient detail/orb controls, upload, quotation confirmation, and
 completion report download.
 

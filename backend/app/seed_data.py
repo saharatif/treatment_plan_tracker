@@ -1,3 +1,10 @@
+"""Static reference data: the 10-Orbs catalog plus ICD-10/CPT/HCPCS billing codes.
+
+Consumed by app/seed.py to populate the orbs and billing_codes tables, and by
+app/services/parser.py (catalog examples in the AI prompt) and
+app/services/enrollment.py (matching parsed orbs to catalog entries).
+"""
+
 ORB_CATALOG = [
     ("LAB-01", "Blood Work - Baseline Labs", "Lab", ["83036", "80053"]),
     ("LAB-02", "Complete Blood Count (CBC)", "Lab", ["85025"]),

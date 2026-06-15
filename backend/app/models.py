@@ -1,3 +1,11 @@
+"""SQLAlchemy ORM models for the orbs, app, billing, and vault schemas.
+
+These map directly to the tables created by the Alembic migrations under
+backend/alembic/versions/. Most query logic in app/services uses raw SQL via
+`text()`; these classes are primarily used for inserts/upserts (e.g. seeding,
+billing quote storage).
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -22,6 +30,9 @@ class Base(DeclarativeBase):
 
 
 class PatientVault(Base):
+    """Encrypted PII storage, keyed by patient_id. Fields are pgp_sym_encrypt'd
+    BYTEA blobs (see app/services/vault.py) - never store plaintext PII here."""
+
     __tablename__ = "patient_vault"
     __table_args__ = {"schema": "vault"}
 
@@ -37,6 +48,9 @@ class PatientVault(Base):
 
 
 class TreatmentPlan(Base):
+    """A patient's 10-Orbs plan. target_date/hard_stop define the checkpoint
+    schedule evaluated by app/services/checkpoints.py."""
+
     __tablename__ = "treatment_plans"
     __table_args__ = {"schema": "app"}
 
@@ -66,6 +80,9 @@ class Diagnosis(Base):
 
 
 class Orb(Base):
+    """Catalog of reusable orb templates (e.g. LAB-01, MED-02), seeded from
+    app/seed_data.py:ORB_CATALOG. Patient-specific instances live in PatientOrb."""
+
     __tablename__ = "orbs"
     __table_args__ = {"schema": "app"}
 
@@ -78,6 +95,9 @@ class Orb(Base):
 
 
 class PatientOrb(Base):
+    """One of the 10 orbs assigned to a patient's plan. orb_ref is the
+    human-readable primary key (see app/ids.py:generate_orb_ref)."""
+
     __tablename__ = "patient_orbs"
     __table_args__ = (
         UniqueConstraint("plan_id", "orb_number", name="uq_patient_orbs_plan_number"),
@@ -97,6 +117,8 @@ class PatientOrb(Base):
 
 
 class AlertLog(Base):
+    """Audit trail of patient/clinic notifications sent by checkpoint evaluation."""
+
     __tablename__ = "alert_log"
     __table_args__ = {"schema": "app"}
 
@@ -109,6 +131,10 @@ class AlertLog(Base):
 
 
 class BillingCode(Base):
+    """Reference table of ICD-10/CPT/HCPCS codes with pricing, seeded from
+    app/seed_data.py. is_billable distinguishes diagnosis codes (False) from
+    procedure/service codes (True) used in quotations."""
+
     __tablename__ = "billing_codes"
     __table_args__ = {"schema": "billing"}
 
@@ -124,6 +150,10 @@ class BillingCode(Base):
 
 
 class QuotationLog(Base):
+    """Record of every billing quote generated for a plan (see
+    app/services/billing.py:build_quotation), including the full plan
+    snapshot used by confirm-billing to enroll orbs."""
+
     __tablename__ = "quotation_log"
     __table_args__ = {"schema": "billing"}
 

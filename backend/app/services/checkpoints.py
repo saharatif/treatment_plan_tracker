@@ -1,3 +1,12 @@
+"""Daily checkpoint evaluation for treatment plans.
+
+Each plan has 4 checkpoints derived from plan_start/duration_days/buffer_days/
+extension_days: an early-warning nudge, the target-date outcome (complete,
+grace period, or extension), a final-warning nudge, and the hard stop that
+closes the plan and generates its completion report. Run once per plan per
+day via app/scheduler.py.
+"""
+
 from datetime import date, timedelta
 from enum import Enum
 from typing import Any
@@ -49,6 +58,8 @@ async def close_plan(plan_id: str, session: AsyncSession) -> None:
     completed = await count_completed_orbs(plan_id, session)
     plan = {"plan_id": plan_id}
     await set_plan_status(plan_id, PlanStatus.CLOSED, session)
+    # Freeze any orb that wasn't completed by the hard stop - "locked" orbs can no
+    # longer be edited via the patient/clinician status endpoints.
     await session.execute(
         text(
             """
@@ -78,6 +89,8 @@ async def evaluate_plan_checkpoints(
     completed = await count_completed_orbs(plan_id, session)
     current_status = PlanStatus(plan.get("status", PlanStatus.ACTIVE))
 
+    # Checkpoint 1: early warning a few days before target_date if the patient is
+    # falling behind (< 8/10 orbs done).
     if today == target_date - timedelta(days=buffer_days) and completed < 8:
         await alert_patient(plan, "checkpoint_1", f"3 days left - {completed}/10 done.", session)
         await alert_clinic(
@@ -88,6 +101,8 @@ async def evaluate_plan_checkpoints(
         )
         return current_status
 
+    # Checkpoint 2: target_date outcome - either fully complete, eligible for a grace
+    # period (>=8/10), or extended for stragglers.
     if today == target_date:
         if completed == 10:
             await set_plan_status(plan_id, PlanStatus.COMPLETED, session)
@@ -104,11 +119,13 @@ async def evaluate_plan_checkpoints(
         await alert_clinic(plan, "checkpoint_2", f"Behind ({completed}/10). Consider outreach.", session)
         return PlanStatus.EXTENDED
 
+    # Checkpoint 3: final warning a few days before the hard stop if still incomplete.
     if today == hard_stop - timedelta(days=buffer_days) and completed < 10:
         await alert_patient(plan, "checkpoint_3", f"Final 3 days - hard deadline {hard_stop:%b %d}.", session)
         await alert_clinic(plan, "checkpoint_3", f"Still incomplete ({completed}/10). Escalate.", session)
         return current_status
 
+    # Checkpoint 4: hard stop reached - close the plan regardless of completion.
     if today >= hard_stop and current_status != PlanStatus.CLOSED:
         await close_plan(plan_id, session)
         return PlanStatus.CLOSED
@@ -117,6 +134,8 @@ async def evaluate_plan_checkpoints(
 
 
 async def evaluate_all_open_plans(session: AsyncSession, today: date | None = None) -> int:
+    # Entry point for the daily scheduler job - evaluates every plan that isn't
+    # already closed and commits all resulting status changes/alerts at once.
     result = await session.execute(
         text(
             """

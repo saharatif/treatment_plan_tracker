@@ -1,3 +1,10 @@
+"""Mutations for individual patient orbs (status transitions and lookups).
+
+`locked` is intentionally excluded from MUTABLE_ORB_STATUSES - it's a
+terminal state set by app/services/checkpoints.py when a plan closes, and
+cannot be set or escaped via the API.
+"""
+
 from typing import Literal
 
 from sqlalchemy import text
@@ -31,14 +38,16 @@ async def set_orb_status(
             """
             UPDATE app.patient_orbs
             SET status = :status,
-                completed_at = CASE WHEN :status = 'complete' THEN NOW() ELSE completed_at END,
+                completed_at = CASE WHEN :status_check = 'complete' THEN NOW() ELSE completed_at END,
                 notes = COALESCE(:notes, notes),
                 updated_at = NOW()
             WHERE orb_ref = :orb_ref
             """
         ),
-        {"orb_ref": orb_ref, "status": status, "notes": notes},
+        {"orb_ref": orb_ref, "status": status, "status_check": status, "notes": notes},
     )
+    # COALESCE(:notes, notes) means passing notes=None leaves existing notes untouched -
+    # there's no way to clear notes via this call, only overwrite them.
 
 
 async def _orb_with_plan_status(orb_ref: str, session: AsyncSession) -> dict | None:
@@ -46,6 +55,8 @@ async def _orb_with_plan_status(orb_ref: str, session: AsyncSession) -> dict | N
 
 
 async def get_orb_context(orb_ref: str, session: AsyncSession) -> dict | None:
+    # Joins to treatment_plans so callers can check plan_status (closed plans lock
+    # their orbs) and patient_id (for patient-scoped authorization checks).
     result = await session.execute(
         text(
             """

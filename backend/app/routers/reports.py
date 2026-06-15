@@ -1,3 +1,6 @@
+"""Serves the per-plan completion report PDF, generating it on first request
+if it doesn't already exist on disk (see app/services/reports.py)."""
+
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession

@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getAccessToken, supabase } from "./supabase";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
-const TOKEN_KEY = "orbs.jwt";
+
+export type CurrentUser = {
+  username: string;
+  role: string;
+  patient_id: string | null;
+};
 
 export type DashboardPlan = {
   patient_id: string;
@@ -18,40 +24,22 @@ export type PatientDetail = {
   orbs: Array<Record<string, string | number | null>>;
 };
 
-export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token);
-}
-
-export function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
-}
-
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getToken();
+  const token = await getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   if (!(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   if (response.status === 401) {
-    clearToken();
+    await supabase.auth.signOut();
     window.dispatchEvent(new Event("auth-expired"));
   }
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
 
-export function useLogin() {
-  return useMutation({
-    mutationFn: (payload: { username: string; password: string; patient_id?: string }) =>
-      request<{ access_token: string; user: { role: string } }>("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      })
-  });
+export function useCurrentUser() {
+  return useQuery({ queryKey: ["current-user"], queryFn: () => request<CurrentUser>("/api/auth/me") });
 }
 
 export function useDashboard() {
@@ -111,12 +99,35 @@ export function useQuotations() {
   return useQuery({ queryKey: ["quotations"], queryFn: () => request<Array<Record<string, unknown>>>("/api/quotations") });
 }
 
+export type ReviewQueueItem = {
+  review_id: string;
+  filename: string;
+  errors: string[];
+  parsed_plan?: Record<string, unknown>;
+};
+
+export function useReviewQueue() {
+  return useQuery({
+    queryKey: ["review-queue"],
+    queryFn: () => request<ReviewQueueItem[]>("/api/review-queue"),
+    refetchInterval: 30000
+  });
+}
+
+export function useReviewQueueItem(reviewId: string | null) {
+  return useQuery({
+    queryKey: ["review-queue", reviewId],
+    queryFn: () => request<ReviewQueueItem>(`/api/review-queue/${reviewId}`),
+    enabled: Boolean(reviewId)
+  });
+}
+
 export function reportUrl(planId: string) {
   return `${API_BASE}/api/plans/${planId}/report`;
 }
 
 export async function downloadReport(planId: string) {
-  const token = getToken();
+  const token = await getAccessToken();
   const response = await fetch(reportUrl(planId), {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   });

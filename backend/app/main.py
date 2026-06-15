@@ -1,3 +1,9 @@
+"""FastAPI application entrypoint.
+
+Wires up CORS, mounts each feature router, and starts/stops the background
+checkpoint scheduler with the app lifecycle.
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -31,6 +37,7 @@ app.include_router(auth.router)
 
 @app.on_event("startup")
 async def startup() -> None:
+    # No-op unless ENABLE_CHECKPOINT_SCHEDULER is set (see app/config.py).
     start_scheduler()
 
 

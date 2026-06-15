@@ -1,3 +1,7 @@
+"""PDF treatment-plan ingestion pipeline: OCR -> AI parsing -> validation ->
+storage -> billing quote. Plans that fail validation are parked in an
+in-memory REVIEW_QUEUE for clinician review rather than being stored."""
+
 import json
 import os
 import shutil
@@ -18,6 +22,8 @@ from app.services.validation import validate_parsed_plan
 
 router = APIRouter(prefix="/api", tags=["ingestion"])
 
+# In-memory only - review items are lost on restart. Fine for the MVP since the
+# review queue is meant to be cleared quickly by staff.
 REVIEW_QUEUE: dict[str, dict[str, Any]] = {}
 
 
@@ -35,6 +41,7 @@ async def ingest_processing_pdf(
         ocr_text = await extract_pdf_text(pdf_path)
         parsed_plan = await extract_orbs_from_text(ocr_text)
     finally:
+        # Uploaded PDF is temporary and may contain PHI - always clean it up.
         os.unlink(pdf_path)
 
     is_valid, errors = validate_parsed_plan(parsed_plan)
@@ -46,6 +53,7 @@ async def ingest_processing_pdf(
             "errors": errors,
         }
 
+    # New plans wait for billing confirmation before their orbs become active.
     parsed_plan["status"] = "pending_enrollment"
     pii = _parse_optional_json(pii_json)
     patient_id = await store_plan(parsed_plan, pii, session)
@@ -59,6 +67,22 @@ async def ingest_processing_pdf(
         "patient_id": patient_id,
         "quote": quote,
     }
+
+
+@router.get("/review-queue", dependencies=[Depends(require_roles("clinician", "coordinator"))])
+async def list_review_queue() -> list[dict[str, Any]]:
+    return [
+        {"review_id": item["review_id"], "filename": item["filename"], "errors": item["errors"]}
+        for item in REVIEW_QUEUE.values()
+    ]
+
+
+@router.get("/review-queue/{review_id}", dependencies=[Depends(require_roles("clinician", "coordinator"))])
+async def get_review_item(review_id: str) -> dict[str, Any]:
+    item = REVIEW_QUEUE.get(review_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Review item not found")
+    return item
 
 
 async def _save_upload(file: UploadFile) -> str:

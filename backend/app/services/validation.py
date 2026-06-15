@@ -1,3 +1,10 @@
+"""Validates an AI/regex-parsed treatment plan before it's stored.
+
+A plan that fails validation is routed to the manual review queue
+(app/routers/ingest.py) instead of being enrolled - this is the main gate
+against malformed AI output reaching the database.
+"""
+
 from datetime import date
 from typing import Any
 
@@ -9,6 +16,7 @@ def validate_parsed_plan(plan: dict[str, Any]) -> tuple[bool, list[str]]:
     errors: list[str] = []
     orbs = plan.get("orbs", [])
 
+    # The 10-Orbs program is fixed-size: every plan must have exactly orbs 1-10.
     if len(orbs) != 10:
         errors.append(f"Expected 10 orbs, found {len(orbs)}")
 

@@ -1,3 +1,8 @@
+"""Billing quotation pipeline: turns a parsed treatment plan into a priced
+quote (matching diagnoses/orb billing codes against the billing_codes table),
+logs it, and emails the billing team a link to review it - without including
+any clinical details in the email itself."""
+
 from datetime import date
 from decimal import Decimal
 import smtplib
@@ -13,6 +18,7 @@ from app.models import BillingCode, QuotationLog
 
 
 def normalize_billing_code(code: str) -> str:
+    # Parsed codes may arrive as "ICD-10: E11.9" or "CPT:99213" - keep only the code itself.
     return code.split(":")[-1].strip().upper()
 
 
@@ -56,6 +62,8 @@ async def build_quotation(plan: dict[str, Any], session: AsyncSession) -> dict[s
             unmatched.append(item)
             continue
         payload = _billing_row_payload(row, source=item["source"])
+        # is_billable distinguishes priced procedure/service codes (CPT/HCPCS) from
+        # diagnosis codes (ICD-10), which are informational only.
         if row.is_billable:
             line_items.append(payload)
         else:
@@ -97,6 +105,8 @@ async def log_quotation(quote: dict[str, Any], session: AsyncSession) -> None:
 
 
 async def email_quotation(quote: dict[str, Any]) -> bool:
+    # SMTP is optional in dev/test - silently skip if unconfigured rather than failing
+    # the whole ingest pipeline.
     if not settings.smtp_host or not settings.billing_email:
         return False
 
@@ -104,6 +114,8 @@ async def email_quotation(quote: dict[str, Any]) -> bool:
     message["Subject"] = f"New quotation ready for review - {quote['quote_id']}"
     message["From"] = "no-reply@orbs.local"
     message["To"] = settings.billing_email
+    # Email links to the portal rather than embedding amounts/codes directly, keeping
+    # PHI and pricing detail out of the message body.
     secure_url = f"{settings.billing_portal_base_url.rstrip('/')}/quotes/{quote['quote_id']}"
     message.set_content(
         "\n".join(
@@ -120,7 +132,11 @@ async def email_quotation(quote: dict[str, Any]) -> bool:
         )
     )
 
-    with smtplib.SMTP(settings.smtp_host) as smtp:
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as smtp:
+        if settings.smtp_use_tls:
+            smtp.starttls()
+        if settings.smtp_user and settings.smtp_password:
+            smtp.login(settings.smtp_user, settings.smtp_password)
         smtp.send_message(message)
     return True
 

@@ -1,9 +1,9 @@
 const colors: Record<string, string> = {
-  pending: "bg-slate-300",
+  pending: "bg-slate-700",
   in_progress: "bg-blue-500",
   complete: "bg-emerald-500",
   skipped: "bg-amber-500",
-  locked: "bg-zinc-700"
+  locked: "bg-zinc-600"
 };
 
 export default function OrbRow({ orbs }: { orbs: Array<Record<string, string | number | null>> }) {
@@ -13,7 +13,7 @@ export default function OrbRow({ orbs }: { orbs: Array<Record<string, string | n
         <span
           key={String(orb.orb_ref)}
           title={`${orb.orb_number}: ${orb.status}`}
-          className={`orb-dot ${colors[String(orb.status)] ?? "bg-slate-300"}`}
+          className={`orb-dot ${colors[String(orb.status)] ?? "bg-slate-700"}`}
         />
       ))}
     </div>

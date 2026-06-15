@@ -1,3 +1,7 @@
+"""Persists a parsed/validated treatment plan: generates patient/plan IDs if
+missing, derives target_date/hard_stop from durations, stores PII in the
+encrypted vault, and writes the treatment_plans + diagnoses rows."""
+
 from datetime import date, timedelta
 from typing import Any
 
@@ -31,6 +35,8 @@ async def _plan_id_exists(session: AsyncSession, plan_id: str) -> bool:
 
 
 async def generate_unique_patient_id(session: AsyncSession) -> str:
+    # generate_patient_id() picks a random suffix, so retry on collision rather than
+    # assuming uniqueness up front.
     for _ in range(MAX_UNIQUE_ID_ATTEMPTS):
         candidate = generate_patient_id()
         if not await _patient_id_exists(session, candidate):
@@ -59,6 +65,8 @@ async def store_plan(plan: dict[str, Any], pii: dict[str, Any] | None, session: 
     if next_visit:
         next_visit = _as_date(next_visit)
 
+    # PII (name/DOB/address/etc.) is stored encrypted in the vault schema, separate
+    # from the clinical plan data - never inlined into treatment_plans.
     if pii:
         await upsert_patient_vault(session, patient_id, pii)
     status = plan.get("status", "active")
